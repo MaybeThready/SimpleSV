@@ -253,6 +253,16 @@ class SimpleSVTrainer:
         print(f"Successfully saved final model: {self.model.config.tdnn_path}")
 
     def save_checkpoint(self, epoch: int, step: int, avg_loss_list: list[float]):
+        # checkpoint数大于5个自动删除最早的
+        checkpoint_files = [
+            f for f in os.listdir(self.config.ckpt_dir) if f.endswith(".pth")
+        ]
+        if len(checkpoint_files) >= 5:
+            checkpoint_files.sort(
+                key=lambda x: os.path.getctime(os.path.join(self.config.ckpt_dir, x))
+            )
+            os.remove(os.path.join(self.config.ckpt_dir, checkpoint_files[0]))
+
         checkpoint = {
             "tdnn_state_dict": self.model.tdnn.state_dict(),
             "classifier_state_dict": self.classifier.state_dict(),

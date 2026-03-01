@@ -14,7 +14,7 @@ class TrainConfig:
     num_classes: int
     log_dir: str
     ckpt_dir: str
-    num_epochs: int = 10
+    num_epochs: int = 20
     step_size_up: int = 1000
     batch_size: int = 128
     eval_freq: int = 100
