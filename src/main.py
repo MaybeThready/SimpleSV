@@ -1,6 +1,8 @@
 import torch
 import pandas as pd
 import torchsummary
+import matplotlib.pyplot as plt
+import os
 from torch.utils.data import DataLoader
 from network.model import SimpleSV, SimpleSVTrainer
 from network.config import TDNNConfig, TrainConfig, DatasetConfig
@@ -14,6 +16,7 @@ TDNN_NETWORK_PATH = r"D:\Code\AI\SimpleSV\data\model\tdnn.pth"
 LOG_DIR = r"D:\Code\AI\SimpleSV\data\model\logs"
 CKPT_DIR = r"D:\Code\AI\SimpleSV\data\model\ckpt"
 DATASET_ROOT_DIR = r"D:\Code\AI\SimpleSV\data\CN-Celeb\CN-Celeb_flac"
+DET_CURVE_DATA_PATH = r"D:\Code\AI\SimpleSV\data\model\det_curve_data.csv"
 
 
 TDNN_CONFIG = TDNNConfig(tdnn_path=TDNN_NETWORK_PATH)
@@ -41,6 +44,7 @@ def main():
         "Train model (first run)",
         "Train model (from checkpoint)",
         "Test model",
+        "Show DET curve",
         "Run TensorBoard",
         "Exit"
     ]
@@ -67,8 +71,10 @@ def main():
         elif choice == "5":
             test()
         elif choice == "6":
-            run_tensorboard()
+            show_det_curve()
         elif choice == "7":
+            run_tensorboard()
+        elif choice == "8":
             break
         else:
             print("Invalid choice. Please try again.")
@@ -134,9 +140,61 @@ def test():
     model = SimpleSV(TDNN_CONFIG, DEVICE)
     model.load_model()
     trainer = SimpleSVTrainer(model, TRAIN_CONFIG)
-    print("Testing...")
-    acc = trainer.test(enroll_dataset, test_dataset)
-    print(f"Test accuracy: {acc*100:.2f}%")
+    print(Rule("Testing", characters="="))
+
+    trial_list_path = os.path.join(DATASET_CONFIG.root_dir, r"eval\lists\trials.lst")
+    with open(trial_list_path, "r") as file:
+        trial_list_raw = [line.strip().split() for line in file.readlines()]
+
+    trail_list = []
+    for trial in trial_list_raw:
+        enroll_file_name, test_file_name, label = trial
+        trail_list.append((enroll_file_name + ".flac", test_file_name[5:].replace(".wav", ".flac"), int(label)))
+
+    fa_list, fr_list, threshold_list, eer_threshold, eer = trainer.test(enroll_dataset, test_dataset, trail_list)
+
+    # 保存DET曲线数据
+    det_curve_data = pd.DataFrame({
+        "threshold": threshold_list,
+        "fa": fa_list,
+        "fr": fr_list
+    })
+    det_curve_data.to_csv(DET_CURVE_DATA_PATH, index=False)
+    print(f"Test EER: {eer:.4f} at threshold {eer_threshold:.4f}")
+    print("DET curve data saved to:", DET_CURVE_DATA_PATH)
+
+
+def show_det_curve():
+    det_curve = pd.read_csv(DET_CURVE_DATA_PATH)
+    fa = det_curve["fa"]
+    fr = det_curve["fr"]
+    threshold = det_curve["threshold"]
+
+    plt.figure(figsize=(8, 6))
+
+    plt.scatter(fa, fr, c=threshold, cmap="winter", s=10)
+    plt.plot([0, 1], [0, 1], "k--", label="EER Line")
+    plt.colorbar(label="Threshold")
+
+    # 计算EER点
+    eer_index = (fa - fr).abs().idxmin()
+    eer_threshold = threshold[eer_index]
+    eer = (fa[eer_index] + fr[eer_index]) / 2
+    plt.scatter(fa[eer_index], fr[eer_index], c="red", s=50, label=f"Threshold {eer_threshold:.4f}")
+
+    # 绘制EER点对应的垂直和水平线
+    plt.axvline(x=fa[eer_index], color="red", linestyle="--")
+    plt.axhline(y=fr[eer_index], color="red", linestyle="--")
+
+    # 绘制EER点对应的线与坐标轴交点的值标签
+    plt.xticks([fa[eer_index], 1], [f"{fa[eer_index]:.4f}", "1.0"])
+    plt.yticks([fr[eer_index], 1], [f"{fr[eer_index]:.4f}", "1.0"])
+
+    plt.xlabel("FA Rate")
+    plt.ylabel("FR Rate")
+    plt.title("DET Curve")
+    plt.legend()
+    plt.show()
 
 
 def run_tensorboard():

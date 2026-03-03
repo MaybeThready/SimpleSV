@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 import torch
 import torch.nn.functional as F
 import os
@@ -47,6 +49,10 @@ class SimpleSV:
             print(f"Speaker ID '{speaker_id}' not found in voiceprint database.")
 
     def find(self, x: torch.Tensor) -> tuple[str, float]:
+        """
+        返回最相似的说话人ID和相似度分数
+        注意：实际应用时需要设置一个相似度阈值，只有当相似度分数超过该阈值时才认为识别成功，否则返回未知说话人。
+        """
         if not self.voiceprint:
             raise ValueError(
                 "Voiceprint database is empty. Please register at least one speaker before finding."
@@ -61,6 +67,24 @@ class SimpleSV:
         index = int(similarity.argmax().item())
         max_similarity = similarity.max().item()
         return speaker_ids[index], max_similarity
+    
+    def get_scores(self, x: torch.Tensor) -> dict[str, float]:
+        """
+        返回所有注册说话人的相似度分数字典
+        """
+        if not self.voiceprint:
+            raise ValueError(
+                "Voiceprint database is empty. Please register at least one speaker before getting scores."
+            )
+        x = x.to(self.device)
+        embedding = self.embedding(x)
+        speaker_ids, voiceprints = zip(*self.voiceprint.items())
+        voiceprints = torch.stack(voiceprints).to(self.device)  # [N, D]
+        embedding = F.normalize(embedding, dim=0)  # [D]
+        voiceprints = F.normalize(voiceprints, dim=1)  # [N, D]
+        similarity = embedding @ voiceprints.T  # [N]
+        scores = {speaker_id: similarity[i].item() for i, speaker_id in enumerate(speaker_ids)}
+        return scores
 
     def save_model(self):
         torch.save(self.tdnn.state_dict(), self.config.tdnn_path)
@@ -135,24 +159,74 @@ class SimpleSVTrainer:
                 total_counts += y.shape[0]
         return total_loss / total_counts
 
-    def test(self, enroll_dataset: Dataset, test_dataset: Dataset):
+    def test(self, enroll_dataset: Dataset, test_dataset: Dataset, trial_list: list):
         self.model.tdnn.eval()
         self.model.clean_all()
+
+        # 注册声纹数据库
+        print("Registering voiceprint database...")
         for x, y in enroll_dataset:
-            x = x.to(self.model.device)
             self.model.register(y, x)
 
-        correct = 0
-        total = 0
+        if not self.model.voiceprint:
+            raise ValueError("Enroll dataset is empty. Cannot run test.")
 
+        enroll_voiceprints = deepcopy(self.model.voiceprint)
+
+        # 生成测试嵌入码。这里偷个懒也用注册的函数
+        print("Calculating voiceprint embeddings...")
+        self.model.clean_all()
         for x, y in test_dataset:
-            x = x.to(self.model.device)
-            pred_speaker_id, _ = self.model.find(x)
-            if pred_speaker_id == y:
-                correct += 1
-            total += 1
+            self.model.register(y, x)
 
-        return correct / total
+        if not self.model.voiceprint:
+            raise ValueError("Test dataset is empty. Cannot run test.")
+
+        test_voiceprints = deepcopy(self.model.voiceprint)
+
+        # 计算相似度分数
+        print("Calculating similarity scores...")
+
+        labels = []
+        enroll_embeddings = []
+        test_embeddings = []
+
+        for enroll_id, test_id, label in trial_list:
+            enroll_embedding = enroll_voiceprints.get(enroll_id)
+            test_embedding = test_voiceprints.get(test_id)
+
+            if enroll_embedding is None:
+                print(f"Warning: Enroll ID '{enroll_id}' not found in enroll dataset. Skipping this trial.")
+                continue
+            if test_embedding is None:
+                print(f"Warning: Test ID '{test_id}' not found in test dataset. Skipping this trial.")
+                continue
+
+            enroll_embeddings.append(enroll_embedding)
+            test_embeddings.append(test_embedding)
+            labels.append(label)
+        
+        scores = F.cosine_similarity(torch.stack(enroll_embeddings), torch.stack(test_embeddings), dim=1)
+        labels = torch.tensor(labels, dtype=torch.long)
+
+        # 计算FA、FR和EER
+        fa_list = []
+        fr_list = []
+        threshold_list = torch.linspace(-1, 1, steps=1000)
+        for threshold in threshold_list:
+            fa = ((scores >= threshold) & (labels == 0)).sum().item() / (labels == 0).sum().item()
+            fr = ((scores < threshold) & (labels == 1)).sum().item() / (labels == 1).sum().item()
+            fa_list.append(fa)
+            fr_list.append(fr)
+
+        fa_tensor = torch.tensor(fa_list)
+        fr_tensor = torch.tensor(fr_list)
+        eer_threshold_index = torch.argmin(torch.abs(fa_tensor - fr_tensor))
+        eer_threshold = threshold_list[eer_threshold_index].item()
+
+        eer = (fa_tensor[eer_threshold_index] + fr_tensor[eer_threshold_index]) / 2
+
+        return fa_list, fr_list, threshold_list, eer_threshold, eer
 
     def train(self, train_loader: DataLoader, val_loader: DataLoader, first_run: bool):
         step = 0

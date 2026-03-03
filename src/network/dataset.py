@@ -79,11 +79,10 @@ class CNCelebTestDataset(Dataset):
         file_names = os.listdir(self.data_dir)
         records = []
         for file_name in file_names:
-            speaker_id = file_name.split("-")[0]
             file_path = os.path.join(self.data_dir, file_name)
             records.append(
                 {
-                    "speaker_id": speaker_id,
+                    "file_name": file_name,
                     "file_path": file_path
                 }
             )
@@ -92,18 +91,18 @@ class CNCelebTestDataset(Dataset):
 
     def __len__(self):
         return len(self.data)
-    
+
     def __getitem__(self, idx):
         record = self.data.iloc[idx]
         file_path = record["file_path"]
-        speaker_id = record["speaker_id"]
+        file_name = record["file_name"]
 
         flac, _ = librosa.load(file_path, sr=self.sample_rate)
         mfcc = librosa.feature.mfcc(y=flac, sr=self.sample_rate, n_mfcc=self.n_mels, n_fft=self.window_length, hop_length=self.hop_length)
 
         mfcc = mfcc - np.mean(mfcc, axis=1, keepdims=True)
 
-        return torch.from_numpy(mfcc).float(), speaker_id
+        return torch.from_numpy(mfcc).float(), file_name
 
 
 def build_datasets(config: DatasetConfig, split=True) -> tuple:
