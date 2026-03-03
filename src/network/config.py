@@ -24,7 +24,7 @@ class TrainConfig:
     min_lr: float = 1e-8
     max_lr: float = 1e-3
     tdnn_weight_decay: float = 2e-5
-    classifier_weight_decay: float = 2e-5
+    classifier_weight_decay: float = 2e-4
 
 
 @dataclass

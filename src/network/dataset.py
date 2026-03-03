@@ -22,6 +22,8 @@ class CNCelebLearnDataset(Dataset):
         id_list = os.listdir(self.data_dir)
         records = []
         for idx, speaker_id in enumerate(id_list):
+            if idx > 799:
+                break  # 只使用前800个说话人进行训练，剩余的说话人用于测试
             speaker_dir = os.path.join(self.data_dir, speaker_id)
             if not os.path.isdir(speaker_dir):
                 continue
