@@ -2,7 +2,7 @@
 
 ## 1. 简介
 
-SimpleSV是一款基于ECAPA-TDNN的说话人识别模型。采用CN-Celeb1数据集进行训练，使用ECAPA-TDNN作为基础模型，结合AAM-Softmax损失函数进行优化。验证阶段使用余弦相似度进行匹配。以当前参数进行训练，在测试集上EER约为7.57%。
+SimpleSV是一款基于ECAPA-TDNN的说话人识别模型。采用CN-Celeb1数据集进行训练，使用ECAPA-TDNN作为基础模型，结合AAM-Softmax损失函数进行优化。验证阶段使用余弦相似度进行匹配。以当前参数进行训练，在测试集上EER约为14.98%。
 
 本项目的代码结构如下：
 
